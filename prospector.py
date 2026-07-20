@@ -177,20 +177,28 @@ PITCH: {pitch}
     if address:      payload["address1"] = address
 
     try:
-        resp = requests.post(f"{GHL_BASE}/contacts/", headers=headers, json=payload, timeout=10)
-        if resp.status_code in [200, 201]:
-            contact_id = resp.json().get("contact", {}).get("id")
-            if contact_id:
-                requests.post(
-                    f"{GHL_BASE}/contacts/{contact_id}/notes",
-                    headers=headers,
-                    json={"body": note},
-                    timeout=10
-                )
-            return contact_id, True
-        else:
-            print(f"  GHL {resp.status_code}: {resp.text[:100]}")
-            return None, False
+        # Retry up to 3 times with backoff on 429
+        for attempt in range(3):
+            resp = requests.post(f"{GHL_BASE}/contacts/", headers=headers, json=payload, timeout=10)
+            if resp.status_code in [200, 201]:
+                contact_id = resp.json().get("contact", {}).get("id")
+                if contact_id:
+                    time.sleep(0.5)
+                    requests.post(
+                        f"{GHL_BASE}/contacts/{contact_id}/notes",
+                        headers=headers,
+                        json={"body": note},
+                        timeout=10
+                    )
+                return contact_id, True
+            elif resp.status_code == 429:
+                wait = (attempt + 1) * 3
+                print(f"  GHL rate limit — waiting {wait}s...")
+                time.sleep(wait)
+            else:
+                print(f"  GHL {resp.status_code}: {resp.text[:100]}")
+                return None, False
+        return None, False
     except Exception as e:
         print(f"  GHL error: {e}")
         return None, False
@@ -218,7 +226,7 @@ def run():
                 name = place.get("displayName", {}).get("text", "?") if isinstance(place.get("displayName"), dict) else "?"
                 print(f"  + {name}")
                 added += 1
-            time.sleep(0.1)
+            time.sleep(1)
 
         total += added
         print(f"  Added: {added}")
