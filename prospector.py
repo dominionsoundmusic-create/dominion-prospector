@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Dominion AI Prospector — Daily Multi-Search
-Uses Google Places Nearby Search with hardcoded coordinates
-No geocoding API needed
+Uses Google Places API (New) — places.googleapis.com/v1/places:searchText
 """
 
 import requests, json, time, datetime, os
@@ -68,26 +67,13 @@ CITY_COORDS = {
 }
 
 NICHES = [
-    ("hvac companies", "HVAC contractor"),
-    ("plumbing companies", "plumber"),
-    ("roofing contractors", "roofing contractor"),
-    ("electricians", "electrician"),
-    ("auto repair shops", "auto repair shop"),
-    ("law firms", "law firm"),
-    ("dental offices", "dentist"),
-    ("restaurants", "restaurant"),
-    ("real estate agents", "real estate agent"),
-    ("landscaping companies", "landscaper"),
-    ("pest control companies", "pest control"),
-    ("cleaning services", "cleaning service"),
-    ("insurance agents", "insurance agent"),
-    ("accounting firms", "accountant"),
-    ("hair salons", "hair salon"),
-    ("veterinary clinics", "veterinarian"),
-    ("home remodeling contractors", "remodeling contractor"),
-    ("painting contractors", "painter"),
-    ("pool service companies", "pool service"),
-    ("HVAC repair", "HVAC technician"),
+    "HVAC companies", "plumbing companies", "roofing contractors",
+    "electricians", "auto repair shops", "law firms", "dental offices",
+    "restaurants", "real estate agents", "landscaping companies",
+    "pest control companies", "cleaning services", "insurance agents",
+    "accounting firms", "hair salons", "veterinary clinics",
+    "home remodeling contractors", "painting contractors",
+    "pool service companies", "HVAC repair",
 ]
 
 CITIES = list(CITY_COORDS.keys())
@@ -96,101 +82,72 @@ def get_todays_searches():
     day = datetime.datetime.now().timetuple().tm_yday
     searches = []
     for i in range(SEARCHES_PER_DAY):
-        niche_idx = (day * 4 + i * 7) % len(NICHES)
-        city_idx  = (day * 3 + i * 11) % len(CITIES)
-        city = CITIES[city_idx]
+        niche = NICHES[(day * 4 + i * 7) % len(NICHES)]
+        city  = CITIES[(day * 3 + i * 11) % len(CITIES)]
         lat, lng = CITY_COORDS[city]
-        niche_query, niche_type = NICHES[niche_idx]
         searches.append({
-            "query": niche_query,
-            "niche_type": niche_type,
+            "query": niche,
             "location": city,
             "lat": lat,
             "lng": lng,
-            "tag": f"prospected-{niche_query.replace(' ','-')}"
+            "tag": f"prospected-{niche.replace(' ','-')}"
         })
     return searches
 
-def search_places(query, lat, lng, max_results=20):
-    """Use Text Search with lat/lng location bias"""
-    results = []
-    next_token = None
-
-    while len(results) < max_results:
-        if next_token:
-            params = {
-                "pagetoken": next_token,
-                "key": GOOGLE_PLACES_API_KEY
+def search_places_new(query, lat, lng, location, max_results=20):
+    """Use Places API (New) — places.googleapis.com/v1/places:searchText"""
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.rating,places.userRatingCount,places.id"
+    }
+    body = {
+        "textQuery": f"{query} in {location}",
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": lat, "longitude": lng},
+                "radius": 40000.0
             }
-            time.sleep(2)
-        else:
-            params = {
-                "query": query,
-                "location": f"{lat},{lng}",
-                "radius": "40000",
-                "key": GOOGLE_PLACES_API_KEY
-            }
+        },
+        "maxResultCount": min(max_results, 20)
+    }
 
-        try:
-            resp = requests.get(
-                "https://maps.googleapis.com/maps/api/place/textsearch/json",
-                params=params,
-                timeout=10
-            )
-            data = resp.json()
-            status = data.get("status")
-            print(f"  API status: {status}")
-
-            if status != "OK":
-                print(f"  API error: {data.get('error_message', 'no message')}")
-                break
-
-            batch = data.get("results", [])
-            results.extend(batch)
-            next_token = data.get("next_page_token")
-
-            if not next_token or len(results) >= max_results:
-                break
-
-        except Exception as e:
-            print(f"  Request error: {e}")
-            break
-
-    return results[:max_results]
-
-def get_place_details(place_id):
     try:
-        resp = requests.get(
-            "https://maps.googleapis.com/maps/api/place/details/json",
-            params={
-                "place_id": place_id,
-                "fields": "name,formatted_phone_number,website,formatted_address,rating,user_ratings_total",
-                "key": GOOGLE_PLACES_API_KEY,
-            },
-            timeout=10
-        ).json()
-        return resp.get("result", {})
-    except:
-        return {}
+        resp = requests.post(url, headers=headers, json=body, timeout=15)
+        print(f"  API status: {resp.status_code}")
+        if resp.status_code == 200:
+            data = resp.json()
+            places = data.get("places", [])
+            print(f"  Raw results: {len(places)}")
+            return places
+        else:
+            print(f"  API error: {resp.text[:200]}")
+            return []
+    except Exception as e:
+        print(f"  Request error: {e}")
+        return []
 
-def create_ghl_contact(business, tag, query, location):
+def create_ghl_contact(place, tag, query, location):
     headers = {
         "Authorization": f"Bearer {GHL_API_KEY}",
         "Content-Type": "application/json",
         "Version": "2021-07-28"
     }
-    name    = business.get("name", "Unknown")
-    phone   = business.get("formatted_phone_number", "")
-    website = business.get("website", "")
-    address = business.get("formatted_address", "")
-    rating  = business.get("rating", "N/A")
-    reviews = business.get("user_ratings_total", 0)
+
+    # Places API New uses different field names
+    name    = place.get("displayName", {}).get("text", "Unknown") if isinstance(place.get("displayName"), dict) else place.get("displayName", "Unknown")
+    phone   = place.get("nationalPhoneNumber", "")
+    website = place.get("websiteUri", "")
+    address = place.get("formattedAddress", "")
+    rating  = place.get("rating", "N/A")
+    reviews = place.get("userRatingCount", 0)
 
     phone_clean = "".join(c for c in phone if c.isdigit() or c == "+")
     if phone_clean and not phone_clean.startswith("+"):
         phone_clean = "+1" + phone_clean
 
-    pitch = "NO WEBSITE — pitch Web Design Pro ($497)" if not website else "Has website — offer CRM/AI services"
+    pitch = "NO WEBSITE — pitch Web Design Pro ($497 free demo)" if not website else "Has website — check quality, offer CRM/AI"
     if rating != "N/A" and float(str(rating)) < 4.5:
         pitch += " | LOW RATING — pitch Review Pro ($197/mo)"
 
@@ -205,29 +162,22 @@ Address: {address}
 
 PITCH: {pitch}
 📞 AI Voice Agent Pros ($297/mo)
-🤖 Dominion AI Agency ($497/mo)"""
+🤖 Dominion AI Agency ($497/mo)
+🌐 Web Design Pro ($497)"""
 
     payload = {
         "locationId": GHL_LOCATION_ID,
         "firstName": name,
         "name": name,
-        "tags": [tag, "auto-prospected"],
+        "tags": [tag, "auto-prospected", query.replace(' ','-').lower()],
         "source": "Dominion Prospector",
     }
-    if phone_clean:
-        payload["phone"] = phone_clean
-    if website:
-        payload["website"] = website
-    if address:
-        payload["address1"] = address
+    if phone_clean:  payload["phone"] = phone_clean
+    if website:      payload["website"] = website
+    if address:      payload["address1"] = address
 
     try:
-        resp = requests.post(
-            f"{GHL_BASE}/contacts/",
-            headers=headers,
-            json=payload,
-            timeout=10
-        )
+        resp = requests.post(f"{GHL_BASE}/contacts/", headers=headers, json=payload, timeout=10)
         if resp.status_code in [200, 201]:
             contact_id = resp.json().get("contact", {}).get("id")
             if contact_id:
@@ -239,17 +189,18 @@ PITCH: {pitch}
                 )
             return contact_id, True
         else:
-            print(f"  GHL error {resp.status_code}: {resp.text[:100]}")
+            print(f"  GHL {resp.status_code}: {resp.text[:100]}")
             return None, False
     except Exception as e:
-        print(f"  GHL exception: {e}")
+        print(f"  GHL error: {e}")
         return None, False
 
 def run():
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     print(f"\n{'='*60}")
     print(f"DOMINION PROSPECTOR — {today}")
-    print(f"API Key present: {'YES' if GOOGLE_PLACES_API_KEY else 'NO'}")
+    print(f"API Key: {'YES' if GOOGLE_PLACES_API_KEY else 'NO'}")
+    print(f"Using: Places API (New)")
     print(f"{'='*60}")
 
     searches = get_todays_searches()
@@ -257,27 +208,26 @@ def run():
 
     for i, s in enumerate(searches):
         print(f"\n[{i+1}/{SEARCHES_PER_DAY}] {s['query']} in {s['location']}")
-        print(f"  Coords: {s['lat']}, {s['lng']}")
-
-        places = search_places(s["query"], s["lat"], s["lng"], RESULTS_PER_SEARCH)
-        print(f"  Found: {len(places)} businesses")
+        places = search_places_new(s["query"], s["lat"], s["lng"], s["location"], RESULTS_PER_SEARCH)
+        print(f"  Found: {len(places)}")
 
         added = 0
         for place in places:
-            pid = place.get("place_id")
-            details = get_place_details(pid) if pid else place
-            time.sleep(0.1)
-            cid, ok = create_ghl_contact(details, s["tag"], s["query"], s["location"])
+            cid, ok = create_ghl_contact(place, s["tag"], s["query"], s["location"])
             if ok:
+                name = place.get("displayName", {}).get("text", "?") if isinstance(place.get("displayName"), dict) else "?"
+                print(f"  + {name}")
                 added += 1
-                print(f"  + {details.get('name','?')}")
+            time.sleep(0.1)
+
         total += added
         print(f"  Added: {added}")
         if i < len(searches) - 1:
-            time.sleep(3)
+            time.sleep(2)
 
     print(f"\n{'='*60}")
     print(f"DONE — {total} leads added to GHL today")
+    print(f"Monthly pace: ~{total * 30}/month")
     print(f"{'='*60}\n")
 
 if __name__ == "__main__":
