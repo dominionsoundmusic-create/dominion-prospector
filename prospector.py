@@ -74,6 +74,13 @@ NICHES = [
     "accounting firms", "hair salons", "veterinary clinics",
     "home remodeling contractors", "painting contractors",
     "pool service companies", "HVAC repair",
+    "real estate investors", "house flippers", "real estate investment companies",
+    "property wholesalers", "real estate wholesalers",
+]
+
+REI_NICHES = [
+    "real estate investors", "house flippers", "real estate investment companies",
+    "property wholesalers", "real estate wholesalers",
 ]
 
 CITIES = list(CITY_COORDS.keys())
@@ -165,11 +172,15 @@ PITCH: {pitch}
 🤖 Dominion AI Agency ($497/mo)
 🌐 Web Design Pro ($497)"""
 
+    if query in REI_NICHES:
+        contact_tags = ["rei-prospect", "hard-money-lead"]
+    else:
+        contact_tags = [tag, "auto-prospected", query.replace(' ','-').lower()]
     payload = {
         "locationId": GHL_LOCATION_ID,
         "firstName": name,
         "name": name,
-        "tags": [tag, "auto-prospected", query.replace(' ','-').lower()],
+        "tags": contact_tags,
         "source": "Dominion Prospector",
     }
     if phone_clean:  payload["phone"] = phone_clean
