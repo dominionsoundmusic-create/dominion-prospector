@@ -6,9 +6,9 @@ Uses Google Places API (New) — places.googleapis.com/v1/places:searchText
 
 import requests, json, time, datetime, os
 
-GOOGLE_PLACES_API_KEY = os.environ.get('GOOGLE_PLACES_API_KEY', 'AIzaSyAQj2J72P12CSfPb4eQmfBLEXjeEdBAE5E')
-GHL_API_KEY           = os.environ.get('GHL_API_KEY', 'pit-ce021c57-bbf2-495f-9a19-8830d8c59c2b')
-GHL_LOCATION_ID       = os.environ.get('GHL_LOCATION_ID', 'T2jYdY6yKrpGB5DjiWqp')
+GOOGLE_PLACES_API_KEY = os.environ.get('GOOGLE_PLACES_API_KEY', '')
+GHL_API_KEY         = os.environ.get('GHL_API_KEY', '')
+GHL_LOCATION_ID     = os.environ.get('GHL_LOCATION_ID', '')
 GHL_BASE              = "https://services.leadconnectorhq.com"
 RESULTS_PER_SEARCH    = 20
 SEARCHES_PER_DAY      = 4
